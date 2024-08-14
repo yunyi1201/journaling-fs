@@ -18,51 +18,53 @@
 // a BlockPath of height 1, tail() returns an invalid blockpath of
 // height 0.
 struct BlockPath {
-    uint32_t val_;
+  uint32_t val_;
 
-    constexpr explicit BlockPath(uint32_t val) : val_(val) {}
-    constexpr operator uint16_t() const { return val_ >> 23; }
-    explicit operator bool() = delete;
-    constexpr uint8_t height() const { return val_ & 3; }
-    // True if path starts at inode rather than indirect block
-    constexpr bool from_inode() const { return val_ & 4; }
+  constexpr explicit BlockPath(uint32_t val) : val_(val) {}
+  constexpr operator uint16_t() const { return val_ >> 23; }
+  explicit operator bool() = delete;
+  constexpr uint8_t height() const { return val_ & 3; }
+  // True if path starts at inode rather than indirect block
+  constexpr bool from_inode() const { return val_ & 4; }
 
-    [[nodiscard]] BlockPath tail() const {
-        if (!height())
-            throw std::logic_error("BlockPath::tail: empty index list");
-        return BlockPath((val_&~7)<<9 | (height()-1));
-    }
+  [[nodiscard]] BlockPath tail() const {
+    if (!height())
+      throw std::logic_error("BlockPath::tail: empty index list");
+    return BlockPath((val_ & ~7) << 9 | (height() - 1));
+  }
 
-    // If a BlockPath pth is being used as a sentinel block,
-    // pth.tail_at(i) represents the sentinel value in the child
-    // pointer i.  If i is before pth, then tail_at returns a path
-    // greater than that of all children, if i is after pth, then
-    // tail_at returns a path before.  Otherwise, returns the path to
-    // the sentinel block.
-    [[nodiscard]] BlockPath tail_at(uint16_t i) const {
-        if (!height())
-            throw std::logic_error("BlockPath::tail_at: empty index list");
-        if (i == *this)
-            return tail();
-        int h = height() - 1;
-        // Special case for asymmetry of ILARG inodes
-        if (from_inode() && h > 0)
-            h = i < IADDR_SIZE-1 ? 1 : 2;
-        if (i < *this)
-            return BlockPath(0x80400000 << 9*(2-h) | h);
-        return BlockPath(h);
-    }
+  // If a BlockPath pth is being used as a sentinel block,
+  // pth.tail_at(i) represents the sentinel value in the child
+  // pointer i.  If i is before pth, then tail_at returns a path
+  // greater than that of all children, if i is after pth, then
+  // tail_at returns a path before.  Otherwise, returns the path to
+  // the sentinel block.
+  [[nodiscard]] BlockPath tail_at(uint16_t i) const {
+    if (!height())
+      throw std::logic_error("BlockPath::tail_at: empty index list");
+    if (i == *this)
+      return tail();
+    int h = height() - 1;
+    // Special case for asymmetry of ILARG inodes
+    if (from_inode() && h > 0)
+      h = i < IADDR_SIZE - 1 ? 1 : 2;
+    if (i < *this)
+      return BlockPath(0x80400000 << 9 * (2 - h) | h);
+    return BlockPath(h);
+  }
 
-    // true if the height() most significant values are all 0.
-    constexpr bool is_zero() const { return val_ >> (5+9*(3-height())) == 0; }
+  // true if the height() most significant values are all 0.
+  constexpr bool is_zero() const {
+    return val_ >> (5 + 9 * (3 - height())) == 0;
+  }
 
-    static BlockPath make(uint16_t b1) { return BlockPath(b1<<23|5); }
-    static BlockPath make(uint16_t b1, uint16_t b2) {
-        return BlockPath(b1<<23|b2<<14|6);
-    }
-    static BlockPath make(uint16_t b1, uint16_t b2, uint16_t b3) {
-        return BlockPath(b1<<23|b2<<14|b3<<5|7);
-    }
+  static BlockPath make(uint16_t b1) { return BlockPath(b1 << 23 | 5); }
+  static BlockPath make(uint16_t b1, uint16_t b2) {
+    return BlockPath(b1 << 23 | b2 << 14 | 6);
+  }
+  static BlockPath make(uint16_t b1, uint16_t b2, uint16_t b3) {
+    return BlockPath(b1 << 23 | b2 << 14 | b3 << 5 | 7);
+  }
 };
 
 // Compute the path to reach a particular block number in a file.  The
@@ -87,56 +89,56 @@ uint16_t blockpath_no(BlockPath pth);
 // ways), but maintains a reference to the underlying
 // buffer or inode to prevent it from being evicted.
 struct BlockPtrArray {
-    std::variant<Ref<Inode>, Ref<Buffer>> ref;
+  std::variant<Ref<Inode>, Ref<Buffer>> ref;
 
-    BlockPtrArray(Ref<Inode> ip) : ref(std::move(ip)) {}
-    BlockPtrArray(Ref<Buffer> bp) : ref(std::move(bp)) {}
+  BlockPtrArray(Ref<Inode> ip) : ref(std::move(ip)) {}
+  BlockPtrArray(Ref<Buffer> bp) : ref(std::move(bp)) {}
 
-    bool is_inode() const { return ref.index() == 0; }
+  bool is_inode() const { return ref.index() == 0; }
 
-    uint16_t size() const {
-        static constexpr uint16_t sizes[] = { IADDR_SIZE, INDBLK_SIZE };
-        return sizes[ref.index()];
-    }
+  uint16_t size() const {
+    static constexpr uint16_t sizes[] = {IADDR_SIZE, INDBLK_SIZE};
+    return sizes[ref.index()];
+  }
 
-    uint16_t at(unsigned idx) {
-        if (idx >= size())
-            throw std::out_of_range("BlockPtrArray size exceeded");
-        return data()[idx];
-    }
-    void set_at(unsigned idx, uint16_t blkno) {
-        if (idx >= size())
-            throw std::out_of_range("BlockPtrArray size exceeded");
-        fs().patch(data()[idx], blkno);
-    }
+  uint16_t at(unsigned idx) {
+    if (idx >= size())
+      throw std::out_of_range("BlockPtrArray size exceeded");
+    return data()[idx];
+  }
+  void set_at(unsigned idx, uint16_t blkno) {
+    if (idx >= size())
+      throw std::out_of_range("BlockPtrArray size exceeded");
+    fs().patch(data()[idx], blkno);
+  }
 
-    // Returns the location of the pointer in the disk image
-    uint32_t pointer_offset(unsigned idx) {
-        return fs().disk_offset(data() + idx);
-    }
+  // Returns the location of the pointer in the disk image
+  uint32_t pointer_offset(unsigned idx) {
+    return fs().disk_offset(data() + idx);
+  }
 
-    Ref<Buffer> fetch_at(unsigned idx) {
-        uint16_t bn = at(idx);
-        return bn ? fs().bread(bn) : nullptr;
-    }
+  Ref<Buffer> fetch_at(unsigned idx) {
+    uint16_t bn = at(idx);
+    return bn ? fs().bread(bn) : nullptr;
+  }
 
-    V6FS &fs() {
-        return visit([](auto &r) -> V6FS & { return r->fs(); }, ref);
-    }
+  V6FS &fs() {
+    return visit([](auto &r) -> V6FS & { return r->fs(); }, ref);
+  }
 
-    // Check all pointers, return false if any of them appear
-    // corrupted (as might happen if an indirect block is not
-    // propertly initialized).
-    bool check(bool dbl_indir = false);
+  // Check all pointers, return false if any of them appear
+  // corrupted (as might happen if an indirect block is not
+  // propertly initialized).
+  bool check(bool dbl_indir = false);
 
 private:
-    uint16_t *data() {
-        static constexpr struct {
-            uint16_t *operator()(Ref<Inode> &ip) const { return ip->i_addr; }
-            uint16_t *operator()(Ref<Buffer> &bp) const {
-                return reinterpret_cast<uint16_t*>(bp->mem_);
-            }
-        } op;
-        return visit(op, ref);
-    }
+  uint16_t *data() {
+    static constexpr struct {
+      uint16_t *operator()(Ref<Inode> &ip) const { return ip->i_addr; }
+      uint16_t *operator()(Ref<Buffer> &bp) const {
+        return reinterpret_cast<uint16_t *>(bp->mem_);
+      }
+    } op;
+    return visit(op, ref);
+  }
 };
