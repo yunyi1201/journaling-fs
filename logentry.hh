@@ -1,11 +1,11 @@
 
 #pragma once
 
+#include "bufio.hh"
+#include "layout.hh"
 #include <stdexcept>
 #include <variant>
-
-#include "layout.hh"
-#include "bufio.hh"
+#include <vector>
 
 // This file defines the on-disk data structures for the journaling
 // version of the V6 file system.  The presence of a journal is
@@ -38,37 +38,36 @@ using lsn_t = uint32_t;
 // the superblock field expressing the number of blocks in the V6 file
 // system).
 struct loghdr {
-    uint32_t l_magic;           // LOG_MAGIC_NUM
-    uint32_t l_hdrblock;        // Block containing this log header
+  uint32_t l_magic;    // LOG_MAGIC_NUM
+  uint32_t l_hdrblock; // Block containing this log header
 
-    // Total size of log in SECTOR_SIZE blocks.  File system plus log
-    // area consume l_hdrblock+l_logsize sectors.
-    uint16_t l_logsize;
+  // Total size of log in SECTOR_SIZE blocks.  File system plus log
+  // area consume l_hdrblock+l_logsize sectors.
+  uint16_t l_logsize;
 
-    // Number of freemap blocks at start of log.
-    uint16_t l_mapsize;
+  // Number of freemap blocks at start of log.
+  uint16_t l_mapsize;
 
-    // Byte offset of the first byte that should be read from the log
-    // after a crash (measured from the start of the disk).
-    uint32_t l_checkpoint;
+  // Byte offset of the first byte that should be read from the log
+  // after a crash (measured from the start of the disk).
+  uint32_t l_checkpoint;
 
-    // First sequence number expected
-    lsn_t l_sequence;
+  // First sequence number expected
+  lsn_t l_sequence;
 
-    char l_pad[SECTOR_SIZE-20];
+  char l_pad[SECTOR_SIZE - 20];
 
-    uint32_t mapstart() const { return l_hdrblock + 1; }
-    uint32_t logstart() const { return mapstart() + l_mapsize; }
-    uint32_t logend() const { return logstart() + l_logsize; }
-    uint32_t logbytes() const {
-        return SECTOR_SIZE * (l_logsize - l_mapsize - 1);
-    }
+  uint32_t mapstart() const { return l_hdrblock + 1; }
+  uint32_t logstart() const { return mapstart() + l_mapsize; }
+  uint32_t logend() const { return logstart() + l_logsize; }
+  uint32_t logbytes() const {
+    return SECTOR_SIZE * (l_logsize - l_mapsize - 1);
+  }
 };
 static_assert(std::is_standard_layout_v<loghdr>,
               "on-disk data strcutures must have standard layout");
 static_assert(sizeof(loghdr) == SECTOR_SIZE,
               "log_header must be exactly one sector");
-
 
 //
 // Types of log entry
@@ -81,8 +80,8 @@ static_assert(sizeof(loghdr) == SECTOR_SIZE,
 // the disk.  (A partial transaction can be discarded because the
 // corresponding metadata will not have been written back to disk.)
 struct LogBegin {
-    static const char *type() { return "LogBegin"; }
-    template<typename F> void archive(F &&f) {}
+  static const char *type() { return "LogBegin"; }
+  template <typename F> void archive(F &&f) {}
 };
 
 // Marks a piece of metadata that must be changed on disk.  it is
@@ -91,16 +90,16 @@ struct LogBegin {
 // must not span sector boundaries, though a single transaction can
 // contain multiple LogPatch operations on different sectors.
 struct LogPatch {
-    uint16_t blockno;           // Block number to patch
-    uint16_t offset_in_block;   // Offset within block of patch
-    std::vector<uint8_t> bytes; // Bytes to place into the block
+  uint16_t blockno;           // Block number to patch
+  uint16_t offset_in_block;   // Offset within block of patch
+  std::vector<uint8_t> bytes; // Bytes to place into the block
 
-    static const char *type() { return "LogPatch"; }
-    template<typename F> void archive(F &&f) {
-        f("blockno", blockno);
-        f("offset_in_block", offset_in_block);
-        f("bytes", bytes);
-    }
+  static const char *type() { return "LogPatch"; }
+  template <typename F> void archive(F &&f) {
+    f("blockno", blockno);
+    f("offset_in_block", offset_in_block);
+    f("bytes", bytes);
+  }
 };
 
 // Records that a previously free block was allocated and marked no
@@ -114,113 +113,103 @@ struct LogPatch {
 // not zero out non-metadata blocks (for which the zero_on_replay
 // field will be 0).
 struct LogBlockAlloc {
-    uint16_t blockno;       // Block number that was allocated
-    uint8_t zero_on_replay; // Metadata--should zero out block on replay
+  uint16_t blockno;       // Block number that was allocated
+  uint8_t zero_on_replay; // Metadata--should zero out block on replay
 
-    static const char *type() { return "LogBlockAlloc"; }
-    template<typename F> void archive(F &&f) {
-        f("blockno", blockno);
-        f("zero_on_replay", zero_on_replay);
-    }
+  static const char *type() { return "LogBlockAlloc"; }
+  template <typename F> void archive(F &&f) {
+    f("blockno", blockno);
+    f("zero_on_replay", zero_on_replay);
+  }
 };
 
 // Records that a previously allocated block is now free.
 struct LogBlockFree {
-    uint16_t blockno;           // Block number of freed block
+  uint16_t blockno; // Block number of freed block
 
-    static const char *type() { return "LogBlockFree"; }
-    template<typename F> void archive(F &&f) {
-        f("blockno", blockno);
-    }
+  static const char *type() { return "LogBlockFree"; }
+  template <typename F> void archive(F &&f) { f("blockno", blockno); }
 };
 
 // Records that a transaction successfully committed.  Only valid if
 // sequence is equal to the log sequence number of the previous
 // LogBegin entry.
 struct LogCommit {
-    uint32_t sequence;          // Serial number of LogBegin
+  uint32_t sequence; // Serial number of LogBegin
 
-    static const char *type() { return "LogCommit"; }
-    template<typename F> void archive(F &&f) {
-        f("sequence", sequence);
-    }
+  static const char *type() { return "LogCommit"; }
+  template <typename F> void archive(F &&f) { f("sequence", sequence); }
 };
 
 // The only operation that need not occur between a LogBegin and
 // LogEnd, this entry indicates that the log wrapped around and the
 // following log entry was written to the beginning of the log area.
 struct LogRewind {
-    static const char *type() { return "LogRewind"; }
-    template<typename F> void archive(F &&f) {}
+  static const char *type() { return "LogRewind"; }
+  template <typename F> void archive(F &&f) {}
 };
 
 // A LogEntry is written out as a Header, followed by an entry (which
 // is one of the above types), followed by a footer.
 struct LogEntry {
-    struct Header {
-        lsn_t sequence;        // First copy of the sequence number
-        uint8_t type;          // What type this is (entry_type index)
-        template<typename F> void archive(F &&f) {
-            f("sequence", sequence);
-            f("type", type);
-        }
-    };
-    using entry_type = std::variant<LogBegin,
-                                    LogPatch,
-                                    LogBlockAlloc,
-                                    LogBlockFree,
-                                    LogCommit,
-                                    LogRewind>;
-    struct Footer {
-        uint32_t checksum;      // CRC-32 of header and object
-        lsn_t sequence;         // Another copy of the sequence number
-        template<typename F> void archive(F &&f) {
-            f("checksum", checksum);
-            f("sequence", sequence);
-        }
-    };
-
-    lsn_t sequence_;            // LSN of this log entry
-    entry_type entry_;          // Payload of this log entry
-
-    LogEntry() : sequence_(0) {}
-    template<typename T> LogEntry(lsn_t sn, T &&t)
-        : sequence_(sn), entry_(std::forward<T>(t)) {}
-
-    // Call an object f with whatever type is currently in entry_.  Example:
-    //   struct F {
-    //      void operator()(LogBegin &e) { ... }
-    //      void operator()(LogPatch &e) { ... }
-    //      ...
-    //   };
-    //   F f;
-    //   le.visit(f);
-    template<typename F> auto visit(F &&f) {
-        return std::visit(std::forward<F>(f), entry_);
+  struct Header {
+    lsn_t sequence; // First copy of the sequence number
+    uint8_t type;   // What type this is (entry_type index)
+    template <typename F> void archive(F &&f) {
+      f("sequence", sequence);
+      f("type", type);
     }
-    template<typename F> auto visit(F &&f) const {
-        return std::visit(std::forward<F>(f), entry_);
+  };
+  using entry_type = std::variant<LogBegin, LogPatch, LogBlockAlloc,
+                                  LogBlockFree, LogCommit, LogRewind>;
+  struct Footer {
+    uint32_t checksum; // CRC-32 of header and object
+    lsn_t sequence;    // Another copy of the sequence number
+    template <typename F> void archive(F &&f) {
+      f("checksum", checksum);
+      f("sequence", sequence);
     }
+  };
 
-    // Use to retrieve a particular type of log entry or NULL.  Example:
-    //   if (LogBegin *b = le.get<LogBegin>())
-    //       do_something_with(b);
-    template<typename T> T *get() { return std::get_if<T>(&entry_); }
-    template<typename T> const T *get() const {
-        return std::get_if<T>(&entry_);
-    }
+  lsn_t sequence_;   // LSN of this log entry
+  entry_type entry_; // Payload of this log entry
 
-    void save(Writer &w) const;
-    bool load(Reader &r);
-    std::string show(const filsys *sb = nullptr) const;
-    size_t nbytes() const;
+  LogEntry() : sequence_(0) {}
+  template <typename T>
+  LogEntry(lsn_t sn, T &&t) : sequence_(sn), entry_(std::forward<T>(t)) {}
+
+  // Call an object f with whatever type is currently in entry_.  Example:
+  //   struct F {
+  //      void operator()(LogBegin &e) { ... }
+  //      void operator()(LogPatch &e) { ... }
+  //      ...
+  //   };
+  //   F f;
+  //   le.visit(f);
+  template <typename F> auto visit(F &&f) {
+    return std::visit(std::forward<F>(f), entry_);
+  }
+  template <typename F> auto visit(F &&f) const {
+    return std::visit(std::forward<F>(f), entry_);
+  }
+
+  // Use to retrieve a particular type of log entry or NULL.  Example:
+  //   if (LogBegin *b = le.get<LogBegin>())
+  //       do_something_with(b);
+  template <typename T> T *get() { return std::get_if<T>(&entry_); }
+  template <typename T> const T *get() const { return std::get_if<T>(&entry_); }
+
+  void save(Writer &w) const;
+  bool load(Reader &r);
+  std::string show(const filsys *sb = nullptr) const;
+  size_t nbytes() const;
 };
 
 // Exception thrown when deserializing corrupt log entires.  Should be
 // caught, as it typically indicates the end of the log rather than a
 // fatal error.
 struct log_corrupt : std::runtime_error {
-    using std::runtime_error::runtime_error;
+  using std::runtime_error::runtime_error;
 };
 
 uint32_t crc32(const void *_buf, size_t len, uint32_t seed);
